@@ -30,7 +30,13 @@ export enum Kind {
   I32_And,
   I32_DivS,
   I32_DivU,
+  I32_Eq,
+  I32_Ge,
+  I32_Gt,
+  I32_Le,
+  I32_Lt,
   I32_Mul,
+  I32_Ne,
   I32_Or,
   I32_RemS,
   I32_RemU,
@@ -38,6 +44,7 @@ export enum Kind {
   I32_ShrS,
   I32_ShrU,
   I32_Sub,
+  I32_Xor,
 
   I32_Call,
   I32_CallImport,
@@ -192,11 +199,11 @@ export function i32_store16(address: Node, offset: number, value: Node): Node {
   };
 }
 
-export function i32_storeLocal(index: number): Node {
+export function i32_storeLocal(index: number, value: Node): Node {
   return {
     kind: Kind.I32_StoreLocal,
     value: index,
-    children: [],
+    children: [value],
   };
 }
 
@@ -232,9 +239,57 @@ export function i32_divU(left: Node, right: Node): Node {
   };
 }
 
+export function i32_eq(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Eq,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_ge(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Ge,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_gt(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Gt,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_le(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Le,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_lt(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Lt,
+    value: 0,
+    children: [left, right],
+  };
+}
+
 export function i32_mul(left: Node, right: Node): Node {
   return {
     kind: Kind.I32_Mul,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_ne(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Ne,
     value: 0,
     children: [left, right],
   };
@@ -296,6 +351,14 @@ export function i32_sub(left: Node, right: Node): Node {
   };
 }
 
+export function i32_xor(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_Xor,
+    value: 0,
+    children: [left, right],
+  };
+}
+
 export function i32_call(id: number, args: Node[]): Node {
   return {
     kind: Kind.I32_Call,
@@ -307,7 +370,7 @@ export function i32_call(id: number, args: Node[]): Node {
 export function i32_callImport(id: number, args: Node[]): Node {
   return {
     kind: Kind.I32_CallImport,
-    value: 0,
+    value: id,
     children: args,
   };
 }
@@ -378,7 +441,13 @@ export function typeOf(kind: Kind): Type {
     case Kind.I32_And:
     case Kind.I32_DivS:
     case Kind.I32_DivU:
+    case Kind.I32_Eq:
+    case Kind.I32_Ge:
+    case Kind.I32_Gt:
+    case Kind.I32_Le:
+    case Kind.I32_Lt:
     case Kind.I32_Mul:
+    case Kind.I32_Ne:
     case Kind.I32_Or:
     case Kind.I32_RemS:
     case Kind.I32_RemU:
@@ -386,6 +455,7 @@ export function typeOf(kind: Kind): Type {
     case Kind.I32_ShrS:
     case Kind.I32_ShrU:
     case Kind.I32_Sub:
+    case Kind.I32_Xor:
 
     case Kind.I32_Call:
     case Kind.I32_CallImport:
@@ -461,7 +531,7 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      if (!isNonNegativeInteger(value) || value >= item.localI32s) {
+      if (!isNonNegativeInteger(value) || value >= item.argTypes.length + item.localI32s) {
         throw new Error(`Function ${item.name}: Invalid local index: ${value}`);
       }
       break;
@@ -495,7 +565,7 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      if (!isNonNegativeInteger(value) || value >= item.localI32s) {
+      if (!isNonNegativeInteger(value) || value >= item.argTypes.length + item.localI32s) {
         throw new Error(`Function ${item.name}: Invalid local index: ${value}`);
       }
 
@@ -507,14 +577,21 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
     case Kind.I32_And:
     case Kind.I32_DivS:
     case Kind.I32_DivU:
+    case Kind.I32_Eq:
+    case Kind.I32_Ge:
+    case Kind.I32_Gt:
+    case Kind.I32_Le:
+    case Kind.I32_Lt:
     case Kind.I32_Mul:
+    case Kind.I32_Ne:
     case Kind.I32_Or:
     case Kind.I32_RemS:
     case Kind.I32_RemU:
     case Kind.I32_Shl:
     case Kind.I32_ShrS:
     case Kind.I32_ShrU:
-    case Kind.I32_Sub: {
+    case Kind.I32_Sub:
+    case Kind.I32_Xor: {
       if (children.length !== 2) {
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
@@ -527,7 +604,7 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
     case Kind.Void_Call:
     case Kind.I32_Call: {
       if (!(value in mapping.functions)) {
-        throw new Error(`Function ${item.name}: Invalid function index: ${value}`);
+        throw new Error(`Function ${item.name}: Invalid function id: ${value}`);
       }
 
       const {argTypes, returnType} = mapping.functions[value];
@@ -549,7 +626,7 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
     case Kind.Void_CallImport:
     case Kind.I32_CallImport: {
       if (!(value in mapping.imports)) {
-        throw new Error(`Function ${item.name}: Invalid import index: ${value}`);
+        throw new Error(`Function ${item.name}: Invalid import id: ${value}`);
       }
 
       const {argTypes, returnType} = mapping.imports[value];

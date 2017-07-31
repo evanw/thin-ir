@@ -1,11 +1,11 @@
 import {Module, Mapping, Node, Type, Kind, typeOf, validate} from './thin-ir';
 
-function joinVariables(prefix: string, count: number): string {
+function joinVariables(prefix: string, count: number, offset: number): string {
   let text = '';
 
   for (let i = 0; i < count; i++) {
     if (i > 0) text += ', ';
-    text += prefix + i;
+    text += prefix + (i + offset);
   }
 
   return text;
@@ -19,12 +19,12 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
 
   text += '(function(imports) {\n';
   text += `  var buffer = new ArrayBuffer(${data.length});\n`;
-  text += '  var m1 = new Int8Array(buffer);\n';
+  text += '  var s1 = new Int8Array(buffer);\n';
   text += '  var u1 = new Uint8Array(buffer);\n';
-  text += '  var m2 = new Int16Array(buffer);\n';
+  text += '  var s2 = new Int16Array(buffer);\n';
   text += '  var u2 = new Uint16Array(buffer);\n';
-  text += '  var m4 = new Int32Array(buffer);\n';
-  text += '  var exports = {};\n';
+  text += '  var s4 = new Int32Array(buffer);\n';
+  text += '  var exports = {u8: u1, i32: s4};\n';
   text += `  var stack = ${stackSize};\n`;
 
   let dataStart = 0;
@@ -42,8 +42,20 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
     text += `], ${dataStart});\n`;
   }
 
+  function mangle(name: string): string {
+    return name.replace(/[^A-Za-z0-9_]/g, '');
+  }
+
+  const importNames: {[id: number]: string} = {};
+  const functionNames: {[id: number]: string} = {};
+
   for (const {id, location, name} of imports) {
-    text += `  var i${id} = imports[${JSON.stringify(location)}][${JSON.stringify(name)}];\n`;
+    importNames[id] = `i${id}_${mangle(name)}`;
+    text += `  var ${importNames[id]} = imports[${JSON.stringify(location)}][${JSON.stringify(name)}];\n`;
+  }
+
+  for (const {id, name} of functions) {
+    functionNames[id] = `f${id}_${mangle(name)}`;
   }
 
   function emitOffset(offset: number): void {
@@ -66,7 +78,7 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
   function emit({kind, value, children}: Node): void {
     switch (kind) {
       case Kind.Void_Call: {
-        text += `${indent}f${value}(`;
+        text += `${indent}${functionNames[value]}(`;
         for (let i = 0; i < children.length; i++) {
           if (i > 0) text += ', ';
           emit(children[i]);
@@ -76,7 +88,7 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.Void_CallImport: {
-        text += `${indent}i${value}(`;
+        text += `${indent}${importNames[value]}(`;
         for (let i = 0; i < children.length; i++) {
           if (i > 0) text += ', ';
           emit(children[i]);
@@ -95,15 +107,15 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.I32_Load: {
-        text += 'm4[';
+        text += 's4[';
         emit(children[0]);
         emitOffset(value);
-        text += ']';
+        text += ' >> 2]';
         break;
       }
 
       case Kind.I32_Load8S: {
-        text += 'm1[';
+        text += 's1[';
         emit(children[0]);
         emitOffset(value);
         text += ']';
@@ -119,10 +131,10 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.I32_Load16S: {
-        text += 'm2[';
+        text += 's2[';
         emit(children[0]);
         emitOffset(value);
-        text += ']';
+        text += ' >> 1]';
         break;
       }
 
@@ -130,12 +142,12 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
         text += 'u2[';
         emit(children[0]);
         emitOffset(value);
-        text += ']';
+        text += ' >> 1]';
         break;
       }
 
       case Kind.I32_LoadLocal: {
-        text += 'l${value}';
+        text += `l${value}`;
         break;
       }
 
@@ -145,16 +157,16 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.I32_Store: {
-        text += 'm4[';
+        text += 's4[';
         emit(children[0]);
         emitOffset(value);
-        text += '] = ';
+        text += ' >> 2] = ';
         emit(children[1]);
         break;
       }
 
       case Kind.I32_Store8: {
-        text += 'm1[';
+        text += 's1[';
         emit(children[0]);
         emitOffset(value);
         text += '] = ';
@@ -163,10 +175,10 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.I32_Store16: {
-        text += 'm2[';
+        text += 's2[';
         emit(children[0]);
         emitOffset(value);
-        text += '] = ';
+        text += ' >> 1] = ';
         emit(children[1]);
         break;
       }
@@ -213,10 +225,64 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
         break;
       }
 
+      case Kind.I32_Eq: {
+        text += '(';
+        emit(children[0]);
+        text += ` === `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
+      case Kind.I32_Ge: {
+        text += '(';
+        emit(children[0]);
+        text += ` >= `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
+      case Kind.I32_Gt: {
+        text += '(';
+        emit(children[0]);
+        text += ` > `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
+      case Kind.I32_Le: {
+        text += '(';
+        emit(children[0]);
+        text += ` <= `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
+      case Kind.I32_Lt: {
+        text += '(';
+        emit(children[0]);
+        text += ` < `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
       case Kind.I32_Mul: {
         text += 'Math.imul(';
         emit(children[0]);
         text += `, `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
+      case Kind.I32_Ne: {
+        text += '(';
+        emit(children[0]);
+        text += ` !== `;
         emit(children[1]);
         text += ')';
         break;
@@ -285,8 +351,17 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
         break;
       }
 
+      case Kind.I32_Xor: {
+        text += '(';
+        emit(children[0]);
+        text += ` ^ `;
+        emit(children[1]);
+        text += ')';
+        break;
+      }
+
       case Kind.I32_Call: {
-        text += `f${value}(`;
+        text += `${functionNames[value]}(`;
         for (let i = 0; i < children.length; i++) {
           if (i > 0) text += ', ';
           emit(children[i]);
@@ -296,7 +371,7 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
       }
 
       case Kind.I32_CallImport: {
-        text += `(i${value}(`;
+        text += `(${importNames[value]}(`;
         for (let i = 0; i < children.length; i++) {
           if (i > 0) text += ', ';
           emit(children[i]);
@@ -368,10 +443,10 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
   }
 
   for (const {name, id, stack, localI32s, argTypes, isExported, body} of functions) {
-    text += `  function f${id}(${joinVariables('a', argTypes.length)}) {\n`;
+    text += `  function ${functionNames[id]}(${joinVariables('l', argTypes.length, 0)}) {\n`;
 
     if (localI32s) {
-      text += `    var ${joinVariables('l', localI32s)};\n`;
+      text += `    var ${joinVariables('l', localI32s, argTypes.length)};\n`;
     }
 
     emitStatement(body);
@@ -379,7 +454,7 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
     text += '  }\n';
 
     if (isExported) {
-      text += `  exports[${JSON.stringify(name)}] = f${id};\n`;
+      text += `  exports[${JSON.stringify(name)}] = ${functionNames[id]};\n`;
     }
   }
 

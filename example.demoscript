@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // "Heap"
 
-_heap = 4
+_heap = 1024
 
 def malloc(size) {
   size = (size + 3) & (0 - 4) // Round up to a multiple of 4
@@ -14,79 +14,80 @@ def memcpy(to, from, size) {
   i = 0
   while (i < size) {
     to[i] = from[i]
+    i = i + 1
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Byte Array
 
-array_size = 0
-array_capacity = 1
-array_data = 2
+_array_size = 0
+_array_capacity = 1
+_array_data = 2
 
 def array_new(size) {
   if (size < 1) size = 1
   ptr = malloc(3 * 4)
-  ptr.array_size = 0
-  ptr.array_capacity = size
-  ptr.array_data = malloc(size)
+  ptr._array_size = 0
+  ptr._array_capacity = size
+  ptr._array_data = malloc(size)
   return ptr
 }
 
 def array_get(array, i) {
-  return ptr.array_data[i]
+  return ptr._array_data[i]
 }
 
 def array_set(array, i, value) {
-  ptr.array_data[i] = value
+  ptr._array_data[i] = value
 }
 
 def array_append(array, value) {
-  size = array.array_size
-  capacity = array.array_capacity
+  size = array._array_size
+  capacity = array._array_capacity
 
   // Grow the array if there's no more space
   if (size == capacity) {
     capacity = capacity * 2
     ptr = malloc(capacity)
-    memcpy(ptr, array.array_data, size)
-    array.array_data = ptr
-    array.array_capacity = capacity
+    memcpy(ptr, array._array_data, size)
+    array._array_data = ptr
+    array._array_capacity = capacity
   }
 
-  array.array_data[size] = value
-  array.array_size = size + 1
+  array._array_data[size] = value
+  array._array_size = size + 1
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Linked List
 
-list_first = 0
-list_last = 1
+_list_first = 0
+_list_last = 1
 
-link_value = 0
-link_next = 1
+_link_value = 0
+_link_next = 1
 
 def list_new() {
   ptr = malloc(2 * 4)
-  ptr.list_first = 0
-  ptr.list_last = 0
+  ptr._list_first = 0
+  ptr._list_last = 0
   return ptr
 }
 
 def list_append(list, value) {
   ptr = malloc(2 * 4)
-  ptr.link_value = value
-  ptr.link_next = 0
+  ptr._link_value = value
+  ptr._link_next = 0
 
-  if (list.list_first == 0) {
-    list.list_first = ptr
-    list.list_last = ptr
+  if (list._list_first == 0) {
+    list._list_first = ptr
+    list._list_last = ptr
   }
 
   else {
-    list.list_last.link_next = ptr
-    list.list_last = ptr
+    list._list_last._link_next = ptr
+    list._list_last = ptr
   }
 
   return ptr
@@ -96,8 +97,20 @@ def list_append(list, value) {
 
 def main() {
   list = list_new()
-  list_append(list, 1)
-  list_append(list, 2)
-  list_append(list, 3)
+  list_append(list, 'a')
+  list_append(list, 'b')
+  list_append(list, 'c')
+  list_append(list, 0)
+
+  array = array_new(2)
+  link = list._list_first
+
+  while (link != 0) {
+    array_append(array, link._link_value)
+    link = link._link_next
+  }
+
+  text = array._array_data
+  print(text)
   return 0
 }
