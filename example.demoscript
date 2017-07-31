@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // "Heap"
 
-_heap = 1024
+_heap = 1024 // Skip over global variables
 
 def malloc(size) {
   size = (size + 3) & (0 - 4) // Round up to a multiple of 4
@@ -19,7 +19,7 @@ def memcpy(to, from, size) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Byte Array
+// Byte array
 
 _array_size = 0
 _array_capacity = 1
@@ -60,7 +60,7 @@ def array_append(array, value) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Linked List
+// Linked list
 
 _list_first = 0
 _list_last = 1
@@ -94,15 +94,19 @@ def list_append(list, value) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Entry point
 
 def main() {
   list = list_new()
-  list_append(list, 'a')
-  list_append(list, 'b')
-  list_append(list, 'c')
-  list_append(list, 0)
+  loop = 1
 
-  array = array_new(2)
+  while (loop) {
+    ch = read()
+    list_append(list, ch)
+    if (ch == 0) loop = 0
+  }
+
+  array = array_new(1)
   link = list._list_first
 
   while (link != 0) {
@@ -111,6 +115,6 @@ def main() {
   }
 
   text = array._array_data
-  print(text)
+  write(text)
   return 0
 }

@@ -319,23 +319,23 @@ function main(): void {
     const module = compile(ast, {memorySize: 128 * 1024});
     const compiled = thin.compileToJS(module, {stackSize: 0});
     const code = `var code = ${new Buffer(compiled).toString()};
-var exports = code({
+var stdin = '';
+var i = 0;
+var env = code({
   global: {
-    print: function(address) {
-      console.log(pointerToString(address));
-    },
+    read: function() { return stdin.charCodeAt(i++); },
+    write: function(address) { process.stdout.write(pointerToString(address)); },
   },
 });
 
 function pointerToString(address) {
-  var text = '';
-  while (exports.u8[address]) {
-    text += String.fromCharCode(exports.u8[address++]);
-  }
-  return text;
+  var stdin = '';
+  while (env.u8[address]) stdin += String.fromCharCode(env.u8[address++]);
+  return stdin;
 }
 
-exports.main();`;
+process.stdin.on('data', function(chunk) { stdin += chunk; });
+process.stdin.on('end', function() { env.main(); });`;
     console.log(code);
   });
 }
