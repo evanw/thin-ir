@@ -1,0 +1,103 @@
+////////////////////////////////////////////////////////////////////////////////
+// "Heap"
+
+_heap = 4
+
+def malloc(size) {
+  size = (size + 3) & (0 - 4) // Round up to a multiple of 4
+  ptr = _heap
+  _heap = _heap + size
+  return ptr
+}
+
+def memcpy(to, from, size) {
+  i = 0
+  while (i < size) {
+    to[i] = from[i]
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Byte Array
+
+array_size = 0
+array_capacity = 1
+array_data = 2
+
+def array_new(size) {
+  if (size < 1) size = 1
+  ptr = malloc(3 * 4)
+  ptr.array_size = 0
+  ptr.array_capacity = size
+  ptr.array_data = malloc(size)
+  return ptr
+}
+
+def array_get(array, i) {
+  return ptr.array_data[i]
+}
+
+def array_set(array, i, value) {
+  ptr.array_data[i] = value
+}
+
+def array_append(array, value) {
+  size = array.array_size
+  capacity = array.array_capacity
+
+  // Grow the array if there's no more space
+  if (size == capacity) {
+    capacity = capacity * 2
+    ptr = malloc(capacity)
+    memcpy(ptr, array.array_data, size)
+    array.array_data = ptr
+    array.array_capacity = capacity
+  }
+
+  array.array_data[size] = value
+  array.array_size = size + 1
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Linked List
+
+list_first = 0
+list_last = 1
+
+link_value = 0
+link_next = 1
+
+def list_new() {
+  ptr = malloc(2 * 4)
+  ptr.list_first = 0
+  ptr.list_last = 0
+  return ptr
+}
+
+def list_append(list, value) {
+  ptr = malloc(2 * 4)
+  ptr.link_value = value
+  ptr.link_next = 0
+
+  if (list.list_first == 0) {
+    list.list_first = ptr
+    list.list_last = ptr
+  }
+
+  else {
+    list.list_last.link_next = ptr
+    list.list_last = ptr
+  }
+
+  return ptr
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+def main() {
+  list = list_new()
+  list_append(list, 1)
+  list_append(list, 2)
+  list_append(list, 3)
+  return 0
+}
