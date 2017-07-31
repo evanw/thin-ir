@@ -1,3 +1,7 @@
+import * as js from './emit-js';
+
+export const compileToJS = js.compile;
+
 export enum Type {
   Void,
   I32,
@@ -8,12 +12,12 @@ export enum Kind {
   Void_CallImport,
   Void_Const,
 
+  I32_Const,
   I32_Load,
   I32_Load8S,
   I32_Load8U,
   I32_Load16S,
   I32_Load16U,
-  I32_LoadConst,
   I32_LoadLocal,
   I32_LoadStack,
 
@@ -71,6 +75,7 @@ export interface Import {
 }
 
 export interface Module {
+  data: Uint8Array;
   imports: Import[];
   functions: Function[];
 }
@@ -95,6 +100,14 @@ export function void_const(): Node {
   return {
     kind: Kind.Void_Const,
     value: 0,
+    children: [],
+  };
+}
+
+export function i32_const(value: number): Node {
+  return {
+    kind: Kind.I32_Const,
+    value: value,
     children: [],
   };
 }
@@ -136,14 +149,6 @@ export function i32_load16U(address: Node, offset: number): Node {
     kind: Kind.I32_Load16U,
     value: offset,
     children: [address],
-  };
-}
-
-export function i32_loadConst(value: number): Node {
-  return {
-    kind: Kind.I32_LoadConst,
-    value: value,
-    children: [],
   };
 }
 
@@ -323,11 +328,11 @@ export function flow_block(children: Node[]): Node {
   };
 }
 
-export function flow_if(test: Node, left: Node, right: Node): Node {
+export function flow_if(test: Node, left: Node, right?: Node): Node {
   return {
     kind: Kind.Flow_If,
     value: 0,
-    children: [test, left, right],
+    children: [test, left, right || void_const()],
   };
 }
 
@@ -339,11 +344,11 @@ export function flow_loop(test: Node, body: Node): Node {
   };
 }
 
-export function flow_return(value: Node): Node {
+export function flow_return(value?: Node): Node {
   return {
     kind: Kind.Flow_Return,
     value: 0,
-    children: [value],
+    children: [value || void_const()],
   };
 }
 
@@ -355,12 +360,12 @@ export function typeOf(kind: Kind): Type {
       return Type.Void;
     }
 
+    case Kind.I32_Const:
     case Kind.I32_Load:
     case Kind.I32_Load8S:
     case Kind.I32_Load8U:
     case Kind.I32_Load16S:
     case Kind.I32_Load16U:
-    case Kind.I32_LoadConst:
     case Kind.I32_LoadLocal:
     case Kind.I32_LoadStack:
 
@@ -407,8 +412,12 @@ function internalError(value: never, error: string): Error {
   return new Error(error);
 }
 
-function validateNode(result: ValidateResult, item: Function, node: Node, type: Type | null): void {
-  const {kind, value, children} = node;
+export interface Mapping {
+  imports: {[id: number]: Import};
+  functions: {[id: number]: Function};
+}
+
+function validateNode(mapping: Mapping, item: Function, {kind, value, children}: Node, type: Type | null): void {
   const expectedType = typeOf(kind);
 
   if (type !== null && expectedType !== type) {
@@ -423,14 +432,18 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
       break;
     }
 
+    case Kind.I32_Const: {
+      if (!isNonNegativeInteger(value) && value !== (value | 0)) {
+        throw new Error(`Function ${item.name}: Invalid constant: ${value}`);
+      }
+      break;
+    }
+
     case Kind.I32_Load:
     case Kind.I32_Load8S:
     case Kind.I32_Load8U:
     case Kind.I32_Load16S:
-    case Kind.I32_Load16U:
-    case Kind.I32_Store:
-    case Kind.I32_Store8:
-    case Kind.I32_Store16: {
+    case Kind.I32_Load16U: {
       if (children.length !== 1) {
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
@@ -439,19 +452,11 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid offset: ${value}`);
       }
 
-      validateNode(result, item, children[0], Type.I32);
+      validateNode(mapping, item, children[0], Type.I32);
       break;
     }
 
-    case Kind.I32_LoadConst: {
-      if (!isNonNegativeInteger(value) && value !== (value | 0)) {
-        throw new Error(`Function ${item.name}: Invalid constant: ${value}`);
-      }
-      break;
-    }
-
-    case Kind.I32_LoadLocal:
-    case Kind.I32_StoreLocal: {
+    case Kind.I32_LoadLocal: {
       if (children.length !== 0) {
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
@@ -466,6 +471,35 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
       if (children.length !== 0) {
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
+      break;
+    }
+
+    case Kind.I32_Store:
+    case Kind.I32_Store8:
+    case Kind.I32_Store16: {
+      if (children.length !== 2) {
+        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
+      }
+
+      if (!isNonNegativeInteger(value)) {
+        throw new Error(`Function ${item.name}: Invalid offset: ${value}`);
+      }
+
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], Type.I32);
+      break;
+    }
+
+    case Kind.I32_StoreLocal: {
+      if (children.length !== 1) {
+        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
+      }
+
+      if (!isNonNegativeInteger(value) || value >= item.localI32s) {
+        throw new Error(`Function ${item.name}: Invalid local index: ${value}`);
+      }
+
+      validateNode(mapping, item, children[0], Type.I32);
       break;
     }
 
@@ -485,25 +519,25 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      validateNode(result, item, children[0], Type.I32);
-      validateNode(result, item, children[1], Type.I32);
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], Type.I32);
       break;
     }
 
     case Kind.Void_Call:
     case Kind.I32_Call: {
-      if (!(value in result.functions)) {
+      if (!(value in mapping.functions)) {
         throw new Error(`Function ${item.name}: Invalid function index: ${value}`);
       }
 
-      const {argTypes, returnType} = result.functions[value];
+      const {argTypes, returnType} = mapping.functions[value];
 
       if (children.length !== argTypes.length) {
         throw new Error(`Function ${item.name}: Invalid function call: expected ${argTypes.length} arguments, got ${children.length} instead`);
       }
 
       for (let i = 0; i < children.length; i++) {
-        validateNode(result, item, children[i], argTypes[i]);
+        validateNode(mapping, item, children[i], argTypes[i]);
       }
 
       if (returnType !== expectedType) {
@@ -514,18 +548,18 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
 
     case Kind.Void_CallImport:
     case Kind.I32_CallImport: {
-      if (!(value in result.imports)) {
+      if (!(value in mapping.imports)) {
         throw new Error(`Function ${item.name}: Invalid import index: ${value}`);
       }
 
-      const {argTypes, returnType} = result.imports[value];
+      const {argTypes, returnType} = mapping.imports[value];
 
       if (children.length !== argTypes.length) {
         throw new Error(`Function ${item.name}: Invalid import call: expected ${argTypes.length} arguments, got ${children.length} instead`);
       }
 
       for (let i = 0; i < children.length; i++) {
-        validateNode(result, item, children[i], argTypes[i]);
+        validateNode(mapping, item, children[i], argTypes[i]);
       }
 
       if (returnType !== expectedType) {
@@ -539,15 +573,15 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      validateNode(result, item, children[0], Type.I32);
-      validateNode(result, item, children[1], Type.I32);
-      validateNode(result, item, children[2], Type.I32);
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], Type.I32);
+      validateNode(mapping, item, children[2], Type.I32);
       break;
     }
 
     case Kind.Flow_Block: {
       for (const child of children) {
-        validateNode(result, item, child, null);
+        validateNode(mapping, item, child, null);
       }
       break;
     }
@@ -557,9 +591,9 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      validateNode(result, item, children[0], Type.I32);
-      validateNode(result, item, children[1], null);
-      validateNode(result, item, children[2], null);
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], null);
+      validateNode(mapping, item, children[2], null);
       break;
     }
 
@@ -568,8 +602,8 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      validateNode(result, item, children[0], Type.I32);
-      validateNode(result, item, children[1], null);
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], null);
       break;
     }
 
@@ -578,7 +612,7 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
-      validateNode(result, item, children[0], item.returnType);
+      validateNode(mapping, item, children[0], item.returnType);
       break;
     }
 
@@ -588,12 +622,7 @@ function validateNode(result: ValidateResult, item: Function, node: Node, type: 
   }
 }
 
-export interface ValidateResult {
-  imports: {[id: number]: Import};
-  functions: {[id: number]: Function};
-}
-
-export function validate(module: Module): ValidateResult {
+export function validate(module: Module): Mapping {
   const imports: {[id: number]: Import} = Object.create(null);
 
   for (const item of module.imports) {
@@ -648,11 +677,11 @@ export function validate(module: Module): ValidateResult {
     functions[item.id] = item;
   }
 
-  const result: ValidateResult = {imports, functions};
+  const mapping: Mapping = {imports, functions};
 
   for (const item of module.functions) {
-    validateNode(result, item, item.body, null);
+    validateNode(mapping, item, item.body, null);
   }
 
-  return result;
+  return mapping;
 }
