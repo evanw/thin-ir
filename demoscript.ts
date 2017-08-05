@@ -287,16 +287,16 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
         case '>>': return thin.i32_shrS(compileNode(node.args[0]), compileNode(node.args[1]));
         case '==': return thin.i32_eq(compileNode(node.args[0]), compileNode(node.args[1]));
         case '!=': return thin.i32_ne(compileNode(node.args[0]), compileNode(node.args[1]));
-        case '<=': return thin.i32_le(compileNode(node.args[0]), compileNode(node.args[1]));
-        case '>=': return thin.i32_ge(compileNode(node.args[0]), compileNode(node.args[1]));
-        case '<': return thin.i32_lt(compileNode(node.args[0]), compileNode(node.args[1]));
-        case '>': return thin.i32_gt(compileNode(node.args[0]), compileNode(node.args[1]));
+        case '<=': return thin.i32_leS(compileNode(node.args[0]), compileNode(node.args[1]));
+        case '>=': return thin.i32_geS(compileNode(node.args[0]), compileNode(node.args[1]));
+        case '<': return thin.i32_ltS(compileNode(node.args[0]), compileNode(node.args[1]));
+        case '>': return thin.i32_gtS(compileNode(node.args[0]), compileNode(node.args[1]));
         case '&&': return thin.i32_select(compileNode(node.args[0]), compileNode(node.args[1]), thin.i32_const(0));
         case '||': return thin.i32_select(compileNode(node.args[0]), thin.i32_const(1), compileNode(node.args[1]));
         case 'if': return thin.flow_if(compileNode(node.args[0]), compileNode(node.args[1]), node.args.length === 3 ? compileNode(node.args[2]) : thin.void_const());
         case 'select': return thin.i32_select(compileNode(node.args[0]), compileNode(node.args[1]), compileNode(node.args[2]));
         case 'block': return thin.flow_block(node.args.map(compileNode));
-        case 'while': return thin.flow_loop(compileNode(node.args[0]), compileNode(node.args[1]));
+        case 'while': return thin.flow_while(compileNode(node.args[0]), compileNode(node.args[1]));
         case 'return': return thin.flow_return(compileNode(node.args[0]));
         case 'def': throw new Error('Nested functions are not supported');
         case '[]': return thin.i32_load8U(computeAddress(node), 0);
@@ -375,8 +375,24 @@ function main(): void {
     const module = compile(ast, {memorySize: 128 * 1024});
     const js = thin.compileToJS(module);
     const wasm = thin.compileToWASM(module);
+    let wasmBytes = '';
+    let lineStart = 0;
+    for (let i = 0; i < wasm.length; i++) {
+      if (wasmBytes) {
+        wasmBytes += ',';
+        if (wasmBytes.length - lineStart > 72) {
+          wasmBytes += '\n  ';
+          lineStart = wasmBytes.length
+        } else {
+          wasmBytes += ' ';
+        }
+      }
+      wasmBytes += wasm[i];
+    }
     const code = `var js = ${new Buffer(js).toString()};
-var wasm = new Uint8Array([${Array.prototype.slice.call(wasm)}]);
+var wasm = new Uint8Array([
+  ${wasmBytes}
+]);
 var stdin = '';
 process.stdin.on('data', function(chunk) { stdin += chunk; });
 process.stdin.on('end', function() { env.main(); });
@@ -390,8 +406,15 @@ if (process.argv.indexOf('--wasm') < 0) {
   env = js({lib: lib});
 } else {
   WebAssembly.instantiate(wasm, {lib: lib}).then(
-    function(value) { env = value.instance.exports; },
-    function(error) { console.error(error.message.trim()); process.exit(1); });
+    function(value) {
+      env = Object.create(value.instance.exports);
+      env.u8 = new Uint8Array(env.memory.buffer);
+    },
+    function(error) {
+      console.error(error.message.trim());
+      process.exit(1);
+    }
+  );
 }
 function pointerToString(address) {
   var stdin = '';

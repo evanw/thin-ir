@@ -32,10 +32,14 @@ export enum Kind {
   I32_DivS,
   I32_DivU,
   I32_Eq,
-  I32_Ge,
-  I32_Gt,
-  I32_Le,
-  I32_Lt,
+  I32_GeS,
+  I32_GeU,
+  I32_GtS,
+  I32_GtU,
+  I32_LeS,
+  I32_LeU,
+  I32_LtS,
+  I32_LtU,
   I32_Mul,
   I32_Ne,
   I32_Or,
@@ -53,8 +57,8 @@ export enum Kind {
 
   Flow_Block,
   Flow_If,
-  Flow_Loop,
   Flow_Return,
+  Flow_While,
 }
 
 export interface Node {
@@ -239,33 +243,65 @@ export function i32_eq(left: Node, right: Node): Node {
   };
 }
 
-export function i32_ge(left: Node, right: Node): Node {
+export function i32_geS(left: Node, right: Node): Node {
   return {
-    kind: Kind.I32_Ge,
+    kind: Kind.I32_GeS,
     value: 0,
     children: [left, right],
   };
 }
 
-export function i32_gt(left: Node, right: Node): Node {
+export function i32_geU(left: Node, right: Node): Node {
   return {
-    kind: Kind.I32_Gt,
+    kind: Kind.I32_GeU,
     value: 0,
     children: [left, right],
   };
 }
 
-export function i32_le(left: Node, right: Node): Node {
+export function i32_gtS(left: Node, right: Node): Node {
   return {
-    kind: Kind.I32_Le,
+    kind: Kind.I32_GtS,
     value: 0,
     children: [left, right],
   };
 }
 
-export function i32_lt(left: Node, right: Node): Node {
+export function i32_gtU(left: Node, right: Node): Node {
   return {
-    kind: Kind.I32_Lt,
+    kind: Kind.I32_GtU,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_leS(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_LeS,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_leU(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_LeU,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_ltS(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_LtS,
+    value: 0,
+    children: [left, right],
+  };
+}
+
+export function i32_ltU(left: Node, right: Node): Node {
+  return {
+    kind: Kind.I32_LtU,
     value: 0,
     children: [left, right],
   };
@@ -391,14 +427,6 @@ export function flow_if(test: Node, left: Node, right?: Node): Node {
   };
 }
 
-export function flow_loop(test: Node, body: Node): Node {
-  return {
-    kind: Kind.Flow_Loop,
-    value: 0,
-    children: [test, body],
-  };
-}
-
 export function flow_return(value?: Node): Node {
   return {
     kind: Kind.Flow_Return,
@@ -407,14 +435,16 @@ export function flow_return(value?: Node): Node {
   };
 }
 
+export function flow_while(test: Node, body: Node): Node {
+  return {
+    kind: Kind.Flow_While,
+    value: 0,
+    children: [test, body],
+  };
+}
+
 export function typeOf(kind: Kind): Type {
   switch (kind) {
-    case Kind.Void_Call:
-    case Kind.Void_CallImport:
-    case Kind.Void_Const: {
-      return Type.Void;
-    }
-
     case Kind.I32_Const:
     case Kind.I32_Load:
     case Kind.I32_Load8S:
@@ -423,20 +453,19 @@ export function typeOf(kind: Kind): Type {
     case Kind.I32_Load16U:
     case Kind.I32_LoadLocal:
 
-    case Kind.I32_Store:
-    case Kind.I32_Store8:
-    case Kind.I32_Store16:
-    case Kind.I32_StoreLocal:
-
     case Kind.I32_Add:
     case Kind.I32_And:
     case Kind.I32_DivS:
     case Kind.I32_DivU:
     case Kind.I32_Eq:
-    case Kind.I32_Ge:
-    case Kind.I32_Gt:
-    case Kind.I32_Le:
-    case Kind.I32_Lt:
+    case Kind.I32_GeS:
+    case Kind.I32_GeU:
+    case Kind.I32_GtS:
+    case Kind.I32_GtU:
+    case Kind.I32_LeS:
+    case Kind.I32_LeU:
+    case Kind.I32_LtS:
+    case Kind.I32_LtU:
     case Kind.I32_Mul:
     case Kind.I32_Ne:
     case Kind.I32_Or:
@@ -454,10 +483,19 @@ export function typeOf(kind: Kind): Type {
       return Type.I32;
     }
 
+    case Kind.Void_Call:
+    case Kind.Void_CallImport:
+    case Kind.Void_Const:
+
+    case Kind.I32_Store:
+    case Kind.I32_Store8:
+    case Kind.I32_Store16:
+    case Kind.I32_StoreLocal:
+
     case Kind.Flow_Block:
     case Kind.Flow_If:
-    case Kind.Flow_Loop:
-    case Kind.Flow_Return: {
+    case Kind.Flow_Return:
+    case Kind.Flow_While: {
       return Type.Void;
     }
   }
@@ -562,10 +600,14 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
     case Kind.I32_DivS:
     case Kind.I32_DivU:
     case Kind.I32_Eq:
-    case Kind.I32_Ge:
-    case Kind.I32_Gt:
-    case Kind.I32_Le:
-    case Kind.I32_Lt:
+    case Kind.I32_GeS:
+    case Kind.I32_GeU:
+    case Kind.I32_GtS:
+    case Kind.I32_GtU:
+    case Kind.I32_LeS:
+    case Kind.I32_LeU:
+    case Kind.I32_LtS:
+    case Kind.I32_LtU:
     case Kind.I32_Mul:
     case Kind.I32_Ne:
     case Kind.I32_Or:
@@ -658,22 +700,22 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
       break;
     }
 
-    case Kind.Flow_Loop: {
-      if (children.length !== 2) {
-        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
-      }
-
-      validateNode(mapping, item, children[0], Type.I32);
-      validateNode(mapping, item, children[1], null);
-      break;
-    }
-
     case Kind.Flow_Return: {
       if (children.length !== 1) {
         throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
 
       validateNode(mapping, item, children[0], item.returnType);
+      break;
+    }
+
+    case Kind.Flow_While: {
+      if (children.length !== 2) {
+        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
+      }
+
+      validateNode(mapping, item, children[0], Type.I32);
+      validateNode(mapping, item, children[1], null);
       break;
     }
 

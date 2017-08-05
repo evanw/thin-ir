@@ -24,7 +24,7 @@ export function compile(module: Module): Uint8Array {
   text += '  var s2 = new Int16Array(buffer);\n';
   text += '  var u2 = new Uint16Array(buffer);\n';
   text += '  var s4 = new Int32Array(buffer);\n';
-  text += '  var exports = {u8: u1, i32: s4};\n';
+  text += '  var exports = {u8: u1};\n';
 
   let dataStart = 0;
   let dataEnd = data.length;
@@ -151,42 +151,46 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Store: {
-        text += 's4[';
+        text += `${indent}s4[`;
         emit(children[0]);
         emitOffset(value);
         text += ' >> 2] = ';
         emit(children[1]);
+        text += ';\n';
         break;
       }
 
       case Kind.I32_Store8: {
-        text += 's1[';
+        text += `${indent}s1[`;
         emit(children[0]);
         emitOffset(value);
         text += '] = ';
         emit(children[1]);
+        text += ';\n';
         break;
       }
 
       case Kind.I32_Store16: {
-        text += 's2[';
+        text += `${indent}s2[`;
         emit(children[0]);
         emitOffset(value);
         text += ' >> 1] = ';
         emit(children[1]);
+        text += ';\n';
         break;
       }
 
       case Kind.I32_StoreLocal: {
-        text += `l${value} = `;
+        text += `${indent}l${value} = `;
         emit(children[0]);
+        text += ';\n';
         break;
       }
 
       case Kind.I32_Add: {
         text += '(';
         emit(children[0]);
-        text += ` + `;
+        text += ' + ';
         emit(children[1]);
         text += ' | 0)';
         break;
@@ -195,7 +199,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_And: {
         text += '(';
         emit(children[0]);
-        text += ` & `;
+        text += ' & ';
         emit(children[1]);
         text += ')';
         break;
@@ -204,7 +208,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_DivS: {
         text += '(';
         emit(children[0]);
-        text += ` / `;
+        text += ' / ';
         emit(children[1]);
         text += ' | 0)';
         break;
@@ -213,7 +217,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_DivU: {
         text += '((';
         emit(children[0]);
-        text += ` >>> 0) / (`;
+        text += ' >>> 0) / (';
         emit(children[1]);
         text += ' >>> 0) | 0)';
         break;
@@ -222,52 +226,88 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Eq: {
         text += '(';
         emit(children[0]);
-        text += ` === `;
+        text += ' === ';
         emit(children[1]);
         text += ')';
         break;
       }
 
-      case Kind.I32_Ge: {
+      case Kind.I32_GeS: {
         text += '(';
         emit(children[0]);
-        text += ` >= `;
+        text += ' >= ';
         emit(children[1]);
         text += ')';
         break;
       }
 
-      case Kind.I32_Gt: {
+      case Kind.I32_GeU: {
+        text += '((';
+        emit(children[0]);
+        text += ' >>> 0) >= (';
+        emit(children[1]);
+        text += ' >>> 0))';
+        break;
+      }
+
+      case Kind.I32_GtS: {
         text += '(';
         emit(children[0]);
-        text += ` > `;
+        text += ' > ';
         emit(children[1]);
         text += ')';
         break;
       }
 
-      case Kind.I32_Le: {
+      case Kind.I32_GtU: {
+        text += '((';
+        emit(children[0]);
+        text += ' >>> 0) > (';
+        emit(children[1]);
+        text += ' >>> 0))';
+        break;
+      }
+
+      case Kind.I32_LeS: {
+        text += '((';
+        emit(children[0]);
+        text += ' >>> 0) <= (';
+        emit(children[1]);
+        text += ' >>> 0))';
+        break;
+      }
+
+      case Kind.I32_LeU: {
+        text += '((';
+        emit(children[0]);
+        text += ' >>> 0) <= (';
+        emit(children[1]);
+        text += ' >>> 0))';
+        break;
+      }
+
+      case Kind.I32_LtS: {
         text += '(';
         emit(children[0]);
-        text += ` <= `;
+        text += ' < ';
         emit(children[1]);
         text += ')';
         break;
       }
 
-      case Kind.I32_Lt: {
-        text += '(';
+      case Kind.I32_LtU: {
+        text += '((';
         emit(children[0]);
-        text += ` < `;
+        text += ' >>> 0) < (';
         emit(children[1]);
-        text += ')';
+        text += ' >>> 0))';
         break;
       }
 
       case Kind.I32_Mul: {
         text += 'Math.imul(';
         emit(children[0]);
-        text += `, `;
+        text += ', ';
         emit(children[1]);
         text += ')';
         break;
@@ -276,7 +316,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Ne: {
         text += '(';
         emit(children[0]);
-        text += ` !== `;
+        text += ' !== ';
         emit(children[1]);
         text += ')';
         break;
@@ -285,7 +325,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Or: {
         text += '(';
         emit(children[0]);
-        text += ` | `;
+        text += ' | ';
         emit(children[1]);
         text += ')';
         break;
@@ -294,7 +334,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_RemS: {
         text += '(';
         emit(children[0]);
-        text += ` % `;
+        text += ' % ';
         emit(children[1]);
         text += ' | 0)';
         break;
@@ -303,7 +343,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_RemU: {
         text += '((';
         emit(children[0]);
-        text += ` >>> 0) % (`;
+        text += ' >>> 0) % (';
         emit(children[1]);
         text += ' >>> 0) | 0)';
         break;
@@ -312,7 +352,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Shl: {
         text += '(';
         emit(children[0]);
-        text += ` << `;
+        text += ' << ';
         emit(children[1]);
         text += ')';
         break;
@@ -321,7 +361,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_ShrS: {
         text += '(';
         emit(children[0]);
-        text += ` >> `;
+        text += ' >> ';
         emit(children[1]);
         text += ')';
         break;
@@ -330,7 +370,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_ShrU: {
         text += '(';
         emit(children[0]);
-        text += ` >>> `;
+        text += ' >>> ';
         emit(children[1]);
         text += ')';
         break;
@@ -339,7 +379,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Sub: {
         text += '(';
         emit(children[0]);
-        text += ` - `;
+        text += ' - ';
         emit(children[1]);
         text += ' | 0)';
         break;
@@ -348,7 +388,7 @@ export function compile(module: Module): Uint8Array {
       case Kind.I32_Xor: {
         text += '(';
         emit(children[0]);
-        text += ` ^ `;
+        text += ' ^ ';
         emit(children[1]);
         text += ')';
         break;
@@ -410,18 +450,6 @@ export function compile(module: Module): Uint8Array {
         break;
       }
 
-      case Kind.Flow_Loop: {
-        const oldIndent = indent;
-        text += `${indent}while (`;
-        emit(children[0]);
-        text += ') {\n';
-        indent += '  ';
-        emitStatement(children[1]);
-        indent = oldIndent;
-        text += `${indent}}\n`;
-        break;
-      }
-
       case Kind.Flow_Return: {
         if (typeOf(children[0].kind) === Type.Void) {
           emit(children[0]);
@@ -431,6 +459,18 @@ export function compile(module: Module): Uint8Array {
           emit(children[0]);
           text += ';\n';
         }
+        break;
+      }
+
+      case Kind.Flow_While: {
+        const oldIndent = indent;
+        text += `${indent}while (`;
+        emit(children[0]);
+        text += ') {\n';
+        indent += '  ';
+        emitStatement(children[1]);
+        indent = oldIndent;
+        text += `${indent}}\n`;
         break;
       }
     }
