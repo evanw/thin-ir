@@ -115,6 +115,7 @@ def main() {
   }
 
   text = array._array_data
+  write("stdin: ")
   write(text)
   return 0
 }

@@ -3,10 +3,10 @@ import * as thin from './thin-ir';
 type NestedOp = 'def' | 'block' | 'if' | 'while' | 'return' | 'call' | 'select' | '=' | '||' | '&&' | '|' |
   '&' | '^' | '==' | '!=' | '<' | '>' | '<=' | '>=' | '<<' | '>>' | '+' | '-' | '*' | '/' | '%' | '.' | '[]';
 type NestedAST = {op: NestedOp, args: AST[]};
-type AST = {op: 'int', value: number} | {op: 'name', value: string} | NestedAST;
+type AST = {op: 'int', value: number} | {op: 'name' | 'string', value: string} | NestedAST;
 
 function parse(source: string): AST[] {
-  const grammar = /([0-9]+|[A-Za-z_][A-Za-z0-9_]*|[<>=!]=|&&|\|\||<<|>>|'.'|[&\|\^\{\}\[\]\(\)\+\-\*\/%=<>?:;,.])/;
+  const grammar = /([0-9]+|[A-Za-z_][A-Za-z0-9_]*|[<>=!]=|&&|\|\||<<|>>|'.'|"(?:[^"\\]|\\.)*"|[&\|\^\{\}\[\]\(\)\+\-\*\/%=<>?:;,.])/;
   const tokens = source.replace(/\/\/.*/g, '').split(grammar).filter((_, i) => i & 1);
   const tree: AST[] = [];
   let i = 0;
@@ -73,6 +73,7 @@ function parse(source: string): AST[] {
     }
 
     if (eat(/^'.'$/)) return {op: 'int', value: tokens[i - 1].charCodeAt(1)};
+    if (eat(/^"(?:[^"\\]|\\.)*"$/)) return {op: 'string', value: tokens[i - 1].slice(1, -1).replace(/\\(.)/g, '$1')};
     if (eat(/^[0-9]+$/)) return {op: 'int', value: parseInt(tokens[i - 1], 10)};
     if (eat(/^[A-Za-z_][A-Za-z0-9_]*$/)) return {op: 'name', value: tokens[i - 1]};
     throw new Error(`Unexpected ${JSON.stringify(tokens[i])}`);
@@ -156,7 +157,8 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
   const functionMap: {[name: string]: thin.Function} = Object.create(null);
   const variableMap: {[name: string]: number} = Object.create(null);
   const globalScope: {[name: string]: boolean} = Object.create(null);
-  const variables: number[] = [0];
+  const stringMap: {[text: string]: number} = Object.create(null);
+  const bytes: number[] = [0, 0, 0, 0];
   let nextFunctionID = 0;
   let nextImportID = 0;
 
@@ -167,9 +169,63 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
     if (right.op !== 'int') throw new Error('Must initialize global variables to constants');
     if (left.value in globalScope) throw new Error(`The global name ${JSON.stringify(left.value)} is already defined`);
 
-    variableMap[left.value] = variables.length * 4;
+    variableMap[left.value] = bytes.length;
     globalScope[left.value] = true;
-    variables.push(right.value);
+    bytes.push(right.value & 255);
+    bytes.push((right.value >> 8) & 255);
+    bytes.push((right.value >> 16) & 255);
+    bytes.push((right.value >> 24) & 255);
+  }
+
+  function allocateString(text: string): number {
+    if (text in stringMap) {
+      return stringMap[text];
+    }
+
+    const ptr = bytes.length;
+
+    for (let i = 0; i < text.length; i++) {
+      let codePoint = text.charCodeAt(i);
+
+      // Decode UTF-16
+      if (codePoint >= 0xD800 && codePoint <= 0xDBFF && i + 1 < text.length) {
+        const extra = text.charCodeAt(i);
+
+        if ((extra & 0xFC00) === 0xDC00) {
+          codePoint = ((codePoint & 0x3FF) << 10) + (extra & 0x3FF) + 0x10000;
+          i++;
+        }
+      }
+
+      // Encode UTF-8
+      if ((codePoint & 0xFFFFFF80) === 0) {
+        bytes.push(codePoint);
+      } else {
+        if ((codePoint & 0xFFFFF800) === 0) {
+          bytes.push(((codePoint >>> 6) & 0x1F) | 0xC0);
+        } else {
+          if ((codePoint & 0xFFFF0000) === 0) {
+            bytes.push(((codePoint >>> 12) & 0x0F) | 0xE0);
+          } else {
+            bytes.push(((codePoint >>> 18) & 0x07) | 0xF0);
+            bytes.push(((codePoint >>> 12) & 0x3F) | 0x80);
+          }
+          bytes.push(((codePoint >>> 6) & 0x3F) | 0x80);
+        }
+        bytes.push((codePoint & 0x3F) | 0x80);
+      }
+    }
+
+    // These string constants are null-terminated
+    bytes.push(0);
+
+    // Make sure the size is still a multiple of 4
+    while (bytes.length % 4 !== 0) {
+      bytes.push(0);
+    }
+
+    stringMap[text] = ptr;
+    return ptr;
   }
 
   function compileGlobalFunction(node: NestedAST): void {
@@ -218,6 +274,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
     function compileNode(node: AST): thin.Node {
       switch (node.op) {
         case 'int': return thin.i32_const(node.value);
+        case 'string': return thin.i32_const(allocateString(node.value));
         case '+': return thin.i32_add(compileNode(node.args[0]), compileNode(node.args[1]));
         case '-': return thin.i32_sub(compileNode(node.args[0]), compileNode(node.args[1]));
         case '*': return thin.i32_mul(compileNode(node.args[0]), compileNode(node.args[1]));
@@ -306,7 +363,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
 
   for (const callback of secondPass) callback();
   const data = new Uint8Array(memorySize);
-  data.set(new Uint8Array(new Int32Array(variables).buffer));
+  data.set(new Uint8Array(bytes));
   return {data, imports, functions};
 }
 
