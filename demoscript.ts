@@ -194,7 +194,6 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
       id: ++nextFunctionID,
       argTypes: args.map(() => thin.Type.I32),
       returnType: thin.Type.I32,
-      stack: 0,
       localI32s: 0,
       isExported: true,
       body: thin.flow_return(thin.i32_const(0)),
@@ -317,7 +316,7 @@ function main(): void {
   process.stdin.on('end', () => {
     const ast = parse(source);
     const module = compile(ast, {memorySize: 128 * 1024});
-    const compiled = thin.compileToJS(module, {stackSize: 0});
+    const compiled = thin.compileToJS(module);
     const code = `var code = ${new Buffer(compiled).toString()};
 var stdin = '';
 var i = 0;

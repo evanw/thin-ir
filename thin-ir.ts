@@ -19,7 +19,6 @@ export enum Kind {
   I32_Load16S,
   I32_Load16U,
   I32_LoadLocal,
-  I32_LoadStack,
 
   I32_Store,
   I32_Store8,
@@ -65,7 +64,6 @@ export interface Node {
 export interface Function {
   name: string;
   id: number;
-  stack: number;
   localI32s: number;
   isExported: boolean;
   argTypes: Type[];
@@ -163,14 +161,6 @@ export function i32_loadLocal(index: number): Node {
   return {
     kind: Kind.I32_LoadLocal,
     value: index,
-    children: [],
-  };
-}
-
-export function i32_loadStack(): Node {
-  return {
-    kind: Kind.I32_LoadStack,
-    value: 0,
     children: [],
   };
 }
@@ -430,7 +420,6 @@ export function typeOf(kind: Kind): Type {
     case Kind.I32_Load16S:
     case Kind.I32_Load16U:
     case Kind.I32_LoadLocal:
-    case Kind.I32_LoadStack:
 
     case Kind.I32_Store:
     case Kind.I32_Store8:
@@ -533,13 +522,6 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
 
       if (!isNonNegativeInteger(value) || value >= item.argTypes.length + item.localI32s) {
         throw new Error(`Function ${item.name}: Invalid local index: ${value}`);
-      }
-      break;
-    }
-
-    case Kind.I32_LoadStack: {
-      if (children.length !== 0) {
-        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
       }
       break;
     }
@@ -734,10 +716,6 @@ export function validate(module: Module): Mapping {
 
     if (item.id in functions) {
       throw new Error(`Function ${item.name}: Duplicate id: ${item.id}`);
-    }
-
-    if (!isNonNegativeInteger(item.stack)) {
-      throw new Error(`Function ${item.name}: Invalid stack: ${item.stack}`);
     }
 
     if (!isNonNegativeInteger(item.localI32s)) {

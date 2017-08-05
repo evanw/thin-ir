@@ -11,7 +11,7 @@ function joinVariables(prefix: string, count: number, offset: number): string {
   return text;
 }
 
-export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8Array {
+export function compile(module: Module): Uint8Array {
   const {data, imports, functions} = module;
   const mapping = validate(module);
   let indent = '    ';
@@ -25,7 +25,6 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
   text += '  var u2 = new Uint16Array(buffer);\n';
   text += '  var s4 = new Int32Array(buffer);\n';
   text += '  var exports = {u8: u1, i32: s4};\n';
-  text += `  var stack = ${stackSize};\n`;
 
   let dataStart = 0;
   let dataEnd = data.length;
@@ -148,11 +147,6 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
 
       case Kind.I32_LoadLocal: {
         text += `l${value}`;
-        break;
-      }
-
-      case Kind.I32_LoadStack: {
-        text += 'stack';
         break;
       }
 
@@ -442,7 +436,7 @@ export function compile(module: Module, {stackSize}: {stackSize: number}): Uint8
     }
   }
 
-  for (const {name, id, stack, localI32s, argTypes, isExported, body} of functions) {
+  for (const {name, id, localI32s, argTypes, isExported, body} of functions) {
     text += `  function ${functionNames[id]}(${joinVariables('l', argTypes.length, 0)}) {\n`;
 
     if (localI32s) {
