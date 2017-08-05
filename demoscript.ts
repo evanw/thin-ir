@@ -334,7 +334,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
             let targetFn = importMap[target.value];
             if (!targetFn) {
               targetFn = {
-                location: 'global',
+                location: 'lib',
                 name: target.value,
                 id: ++nextImportID,
                 argTypes: args.map(() => thin.Type.I32),
@@ -373,25 +373,31 @@ function main(): void {
   process.stdin.on('end', () => {
     const ast = parse(source);
     const module = compile(ast, {memorySize: 128 * 1024});
-    const compiled = thin.compileToJS(module);
-    const code = `var code = ${new Buffer(compiled).toString()};
+    const js = thin.compileToJS(module);
+    const wasm = thin.compileToWASM(module);
+    const code = `var js = ${new Buffer(js).toString()};
+var wasm = new Uint8Array([${Array.prototype.slice.call(wasm)}]);
 var stdin = '';
+process.stdin.on('data', function(chunk) { stdin += chunk; });
+process.stdin.on('end', function() { env.main(); });
 var i = 0;
-var env = code({
-  global: {
-    read: function() { return stdin.charCodeAt(i++); },
-    write: function(address) { process.stdout.write(pointerToString(address)); },
-  },
-});
-
+var lib = {
+  read: function() { return stdin.charCodeAt(i++); },
+  write: function(address) { process.stdout.write(pointerToString(address)); },
+};
+var env;
+if (process.argv.indexOf('--wasm') < 0) {
+  env = js({lib: lib});
+} else {
+  WebAssembly.instantiate(wasm, {lib: lib}).then(
+    function(value) { env = value.instance.exports; },
+    function(error) { console.error(error.message.trim()); process.exit(1); });
+}
 function pointerToString(address) {
   var stdin = '';
   while (env.u8[address]) stdin += String.fromCharCode(env.u8[address++]);
   return stdin;
-}
-
-process.stdin.on('data', function(chunk) { stdin += chunk; });
-process.stdin.on('end', function() { env.main(); });`;
+}`;
     console.log(code);
   });
 }

@@ -1,6 +1,8 @@
 import * as js from './emit-js';
+import * as wasm from './emit-wasm';
 
 export const compileToJS = js.compile;
+export const compileToWASM = wasm.compile;
 
 export enum Type {
   Void,
