@@ -1,4 +1,4 @@
-import {Module, Mapping, Node, Type, Kind, typeOf, validate} from './thin-ir';
+import {Module, Mapping, Node, Type, Kind, typeOf, validate, Section} from './thin-ir';
 
 enum WasmType {
   I32 = -0x01,
@@ -237,7 +237,9 @@ class ByteArray {
   appendByte(value: number): void {
     if (this._length === this._capacity) {
       this._capacity *= 2;
-      this._bytes = new Uint8Array(this._capacity);
+      const bytes = new Uint8Array(this._capacity);
+      bytes.set(this._bytes);
+      this._bytes = bytes;
     }
 
     this._bytes[this._length++] = value;
@@ -333,7 +335,7 @@ class ByteArray {
   }
 }
 
-interface Section {
+interface Chunk {
   id: number;
   data: ByteArray;
 }
@@ -344,15 +346,16 @@ interface FunctionType {
 }
 
 export function compile(module: Module): Uint8Array {
-  const {data, imports, functions} = module;
+  const {readOnly, readWrite, imports, functions} = module;
   const mapping = validate(module);
-  const typeSection: Section = {id: WasmSection.Type, data: new ByteArray()};
-  const importSection: Section = {id: WasmSection.Import, data: new ByteArray()};
-  const functionSection: Section = {id: WasmSection.Function, data: new ByteArray()};
-  const exportSection: Section = {id: WasmSection.Export, data: new ByteArray()};
-  const memorySection: Section = {id: WasmSection.Memory, data: new ByteArray()};
-  const codeSection: Section = {id: WasmSection.Code, data: new ByteArray()};
-  const dataSection: Section = {id: WasmSection.Data, data: new ByteArray()};
+  const typeSection: Chunk = {id: WasmSection.Type, data: new ByteArray()};
+  const importSection: Chunk = {id: WasmSection.Import, data: new ByteArray()};
+  const functionSection: Chunk = {id: WasmSection.Function, data: new ByteArray()};
+  const memorySection: Chunk = {id: WasmSection.Memory, data: new ByteArray()};
+  const globalSection: Chunk = {id: WasmSection.Global, data: new ByteArray()};
+  const exportSection: Chunk = {id: WasmSection.Export, data: new ByteArray()};
+  const codeSection: Chunk = {id: WasmSection.Code, data: new ByteArray()};
+  const dataSection: Chunk = {id: WasmSection.Data, data: new ByteArray()};
   const functionIndexFromID: {[id: number]: number} = Object.create(null);
   const importIndexFromID: {[id: number]: number} = Object.create(null);
   const functionTypes: FunctionType[] = [];
@@ -376,31 +379,35 @@ export function compile(module: Module): Uint8Array {
     return functionTypes.length - 1;
   }
 
-  memorySection.data.appendVarU(1);
-  memorySection.data.appendVarU(0);
-  memorySection.data.appendVarU(module.data.length + 0xFFFF >>> 16);
+  const sections: Section[] = [];
+  if (readOnly !== null) sections.push(readOnly);
+  if (readWrite !== null) sections.push(readWrite);
 
-  let dataStart = 0;
-  let dataEnd = data.length;
+  let sectionsEnd = 0;
+  if (sections.length > 0) {
+    for (const section of sections) {
+      sectionsEnd = Math.max(sectionsEnd, section.offset + section.data.length);
+    }
 
-  while (dataStart < dataEnd && !data[dataStart]) dataStart++;
-  while (dataStart < dataEnd && !data[dataEnd - 1]) dataEnd--;
+    dataSection.data.appendVarU(sections.length);
 
-  if (dataStart < dataEnd) {
-    dataSection.data.appendVarU(1);
-    dataSection.data.appendVarU(0);
-    dataSection.data.appendByte(WasmOp.I32_Const);
-    dataSection.data.appendVarS(dataStart);
-    dataSection.data.appendByte(WasmOp.End);
-    dataSection.data.appendVarU(dataEnd - dataStart);
-    for (let i = dataStart; i < dataEnd; i++) {
-      dataSection.data.appendByte(data[i]);
+    memorySection.data.appendVarU(1);
+    memorySection.data.appendVarU(0);
+    memorySection.data.appendVarU(sectionsEnd + 0xFFFF >>> 16);
+
+    for (const section of sections) {
+      dataSection.data.appendVarU(0);
+      dataSection.data.appendByte(WasmOp.I32_Const);
+      dataSection.data.appendVarU(section.offset);
+      dataSection.data.appendByte(WasmOp.End);
+      dataSection.data.appendVarU(section.data.length);
+      dataSection.data.append(section.data);
     }
   }
 
   importSection.data.appendVarU(imports.length);
-  functionSection.data.appendVarU(functions.length);
-  codeSection.data.appendVarU(functions.length);
+  functionSection.data.appendVarU(functions.length + 1);
+  codeSection.data.appendVarU(functions.length + 1);
 
   for (let i = 0; i < imports.length; i++) {
     const item = imports[i];
@@ -775,6 +782,13 @@ export function compile(module: Module): Uint8Array {
           body.appendByte(WasmOp.End);
           break;
         }
+
+        case Kind.Mem_Alloc: {
+          compileNode(node.children[0]);
+          body.appendByte(WasmOp.Call);
+          body.appendVarU(imports.length + functions.length);
+          break;
+        }
       }
     };
 
@@ -790,6 +804,134 @@ export function compile(module: Module): Uint8Array {
     codeSection.data.appendVarU(body.length());
     codeSection.data.append(body.toUint8Array());
   }
+
+  function implementAlloc(): void {
+    const globalNext = 0;
+    const globalMax = 1;
+    const localSize = 0;
+    const localPtr = 1;
+    const globals: number[] = [0, 0];
+    globals[globalNext] = sectionsEnd + 7 & ~7;
+    globals[globalMax] = sectionsEnd + 0xFFFF & ~0xFFFF;
+
+    // Allocate space for global variables to implement "alloc"
+    globalSection.data.appendVarU(globals.length);
+    for (const value of globals) {
+      globalSection.data.appendVarS(WasmType.I32);
+      globalSection.data.appendVarU(1);
+      globalSection.data.appendByte(WasmOp.I32_Const);
+      globalSection.data.appendVarS(value);
+      globalSection.data.appendByte(WasmOp.End);
+    }
+
+    // The implementation of "alloc" looks something like this:
+    //
+    //   var next: number;
+    //   var max: number;
+    //
+    //   function alloc(size: number): number {
+    //     var ptr: number;
+    //     next = (ptr = next) + size;
+    //
+    //     if (next > (size = max)) {
+    //       max = next + 0xFFFF & ~0xFFFF;
+    //
+    //       if (grow_memory(max - size >> 16) == -1) {
+    //         unreachable;
+    //       }
+    //     }
+    //
+    //     return ptr;
+    //   }
+    //
+    const body = new ByteArray();
+    {
+      // var ptr: number;
+      body.appendVarU(1);
+      body.appendVarU(1);
+      body.appendVarS(WasmType.I32);
+    }
+    {
+      // next = (ptr = next) + size;
+      body.appendByte(WasmOp.GetGlobal);
+      body.appendVarU(globalNext);
+      body.appendByte(WasmOp.TeeLocal);
+      body.appendVarU(localPtr);
+      body.appendByte(WasmOp.GetLocal);
+      body.appendVarU(localSize);
+      body.appendByte(WasmOp.I32_Add);
+      body.appendByte(WasmOp.SetGlobal);
+      body.appendVarU(globalNext);
+    }
+    {
+      // next > (size = max)
+      body.appendByte(WasmOp.GetGlobal);
+      body.appendVarU(globalNext);
+      body.appendByte(WasmOp.GetGlobal);
+      body.appendVarU(globalMax);
+      body.appendByte(WasmOp.TeeLocal);
+      body.appendVarU(localSize);
+      body.appendByte(WasmOp.I32_Gt_U);
+    }
+    {
+      // if (...) {
+      body.appendByte(WasmOp.If);
+      body.appendVarS(WasmType.Void);
+      {
+        // max = next + 0xFFFF & ~0xFFFF;
+        body.appendByte(WasmOp.GetGlobal);
+        body.appendVarU(globalNext);
+        body.appendByte(WasmOp.I32_Const);
+        body.appendVarS(0xFFFF);
+        body.appendByte(WasmOp.I32_Add);
+        body.appendByte(WasmOp.I32_Const);
+        body.appendVarS(~0xFFFF);
+        body.appendByte(WasmOp.I32_And);
+        body.appendByte(WasmOp.SetGlobal);
+        body.appendVarU(globalMax);
+      }
+      {
+        // grow_memory(max - size >> 16) == -1
+        body.appendByte(WasmOp.GetGlobal);
+        body.appendVarU(globalMax);
+        body.appendByte(WasmOp.GetLocal);
+        body.appendVarU(localSize);
+        body.appendByte(WasmOp.I32_Sub);
+        body.appendByte(WasmOp.I32_Const);
+        body.appendVarS(16);
+        body.appendByte(WasmOp.I32_Shr_U);
+        body.appendByte(WasmOp.GrowMemory);
+        body.appendVarU(0);
+        body.appendByte(WasmOp.I32_Const);
+        body.appendVarS(-1);
+        body.appendByte(WasmOp.I32_Eq);
+      }
+      {
+        // if (...) unreachable;
+        body.appendByte(WasmOp.If);
+        body.appendVarS(WasmType.Void);
+        body.appendByte(WasmOp.Unreachable);
+        body.appendByte(WasmOp.End);
+      }
+      // }
+      body.appendByte(WasmOp.End);
+    }
+    {
+      // return ptr;
+      body.appendByte(WasmOp.GetLocal);
+      body.appendVarU(localPtr);
+    }
+    body.appendByte(WasmOp.End);
+
+    // The type of "alloc"
+    functionSection.data.appendVarU(indexOfFunctionType([Type.I32], Type.I32));
+
+    // The implementation of "alloc"
+    codeSection.data.appendVarU(body.length());
+    codeSection.data.append(body.toUint8Array());
+  }
+
+  implementAlloc();
 
   bytes.appendInt(0x6d736100);
   bytes.appendInt(0x1);
@@ -827,7 +969,18 @@ export function compile(module: Module): Uint8Array {
     }
   }
 
-  for (const section of [typeSection, importSection, functionSection, memorySection, exportSection, codeSection, dataSection]) {
+  const wasmSections = [
+    typeSection,
+    importSection,
+    functionSection,
+    memorySection,
+    globalSection,
+    exportSection,
+    codeSection,
+    dataSection,
+  ];
+
+  for (const section of wasmSections) {
     bytes.appendVarU(section.id);
     bytes.appendVarU(section.data.length());
     bytes.append(section.data.toUint8Array());

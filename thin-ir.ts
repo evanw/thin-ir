@@ -59,6 +59,8 @@ export enum Kind {
   Flow_If,
   Flow_Return,
   Flow_While,
+
+  Mem_Alloc,
 }
 
 export interface Node {
@@ -85,8 +87,14 @@ export interface Import {
   returnType: Type;
 }
 
-export interface Module {
+export interface Section {
+  offset: number;
   data: Uint8Array;
+}
+
+export interface Module {
+  readOnly: Section | null;
+  readWrite: Section | null;
   imports: Import[];
   functions: Function[];
 }
@@ -443,6 +451,14 @@ export function flow_while(test: Node, body: Node): Node {
   };
 }
 
+export function mem_alloc(size: Node): Node {
+  return {
+    kind: Kind.Mem_Alloc,
+    value: 0,
+    children: [size],
+  };
+}
+
 export function typeOf(kind: Kind): Type {
   switch (kind) {
     case Kind.I32_Const:
@@ -479,7 +495,9 @@ export function typeOf(kind: Kind): Type {
 
     case Kind.I32_Call:
     case Kind.I32_CallImport:
-    case Kind.I32_Select: {
+    case Kind.I32_Select:
+
+    case Kind.Mem_Alloc: {
       return Type.I32;
     }
 
@@ -719,14 +737,57 @@ function validateNode(mapping: Mapping, item: Function, {kind, value, children}:
       break;
     }
 
+    case Kind.Mem_Alloc: {
+      if (children.length !== 1) {
+        throw new Error(`Function ${item.name}: Invalid node: ${Kind[kind]}`);
+      }
+
+      validateNode(mapping, item, children[0], Type.I32);
+      break;
+    }
+
     default: {
       throw internalError(kind, `Function ${item.name}: Unexpected node`);
     }
   }
 }
 
+function validateSection(name: string, {offset, data}: Section): void {
+  if (!isNonNegativeInteger(offset)) {
+    throw new Error(`Invalid ${name} section offset: ${offset}`);
+  }
+
+  if (offset % 4096 !== 0) {
+    throw new Error(`The ${name} section offset must be a multiple of 4096: ${offset}`);
+  }
+
+  if (offset === 0) {
+    throw new Error(`Cannot map the ${name} section to offset 0`);
+  }
+}
+
 export function validate(module: Module): Mapping {
   const imports: {[id: number]: Import} = Object.create(null);
+  const {readOnly, readWrite} = module;
+
+  if (readOnly !== null) {
+    validateSection('read-only', readOnly);
+  }
+
+  if (readWrite !== null) {
+    validateSection('read-write', readWrite);
+  }
+
+  if (readOnly !== null && readWrite !== null) {
+    const roStart = readOnly.offset;
+    const rwStart = readWrite.offset;
+    const roEnd = roStart + readOnly.data.length;
+    const rwEnd = rwStart + readWrite.data.length;
+
+    if (roStart < rwEnd && rwStart < roEnd) {
+      throw new Error('The read-only section and the read-write section cannot overlap');
+    }
+  }
 
   for (const item of module.imports) {
     if (!isNonNegativeInteger(item.id)) {

@@ -1,6 +1,6 @@
 import * as thin from './thin-ir';
 
-type NestedOp = 'def' | 'block' | 'if' | 'while' | 'return' | 'call' | 'select' | '=' | '||' | '&&' | '|' |
+type NestedOp = 'def' | 'block' | 'if' | 'while' | 'return' | 'call' | 'select' | 'new' | '=' | '||' | '&&' | '|' |
   '&' | '^' | '==' | '!=' | '<' | '>' | '<=' | '>=' | '<<' | '>>' | '+' | '-' | '*' | '/' | '%' | '.' | '[]';
 type NestedAST = {op: NestedOp, args: AST[]};
 type AST = {op: 'int', value: number} | {op: 'name' | 'string', value: string} | NestedAST;
@@ -41,6 +41,13 @@ function parse(source: string): AST[] {
       expect(')');
       args.push(expression(0));
       return {op: 'def', args};
+    }
+
+    if (eat('new')) {
+      expect('(');
+      const args = [expression(0)];
+      expect(')');
+      return {op: 'new', args};
     }
 
     if (eat('{')) {
@@ -158,7 +165,8 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
   const variableMap: {[name: string]: number} = Object.create(null);
   const globalScope: {[name: string]: boolean} = Object.create(null);
   const stringMap: {[text: string]: number} = Object.create(null);
-  const bytes: number[] = [0, 0, 0, 0];
+  const readWriteOffset = 4096;
+  const bytes: number[] = [];
   let nextFunctionID = 0;
   let nextImportID = 0;
 
@@ -169,7 +177,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
     if (right.op !== 'int') throw new Error('Must initialize global variables to constants');
     if (left.value in globalScope) throw new Error(`The global name ${JSON.stringify(left.value)} is already defined`);
 
-    variableMap[left.value] = bytes.length;
+    variableMap[left.value] = readWriteOffset + bytes.length;
     globalScope[left.value] = true;
     bytes.push(right.value & 255);
     bytes.push((right.value >> 8) & 255);
@@ -182,7 +190,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
       return stringMap[text];
     }
 
-    const ptr = bytes.length;
+    const ptr = readWriteOffset + bytes.length;
 
     for (let i = 0; i < text.length; i++) {
       let codePoint = text.charCodeAt(i);
@@ -301,6 +309,7 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
         case 'def': throw new Error('Nested functions are not supported');
         case '[]': return thin.i32_load8U(computeAddress(node), 0);
         case '.': return thin.i32_load(computeAddress(node), 0);
+        case 'new': return thin.mem_alloc(compileNode(node.args[0]));
 
         case '=': {
           const [left, right] = node.args;
@@ -362,9 +371,11 @@ function compile(ast: AST[], {memorySize}: {memorySize: number}): thin.Module {
   }
 
   for (const callback of secondPass) callback();
-  const data = new Uint8Array(memorySize);
-  data.set(new Uint8Array(bytes));
-  return {data, imports, functions};
+  const readWrite: thin.Section | null = bytes.length > 0 ? {
+    offset: readWriteOffset,
+    data: new Uint8Array(bytes),
+  } : null;
+  return {readOnly: null, readWrite, imports, functions};
 }
 
 function main(): void {
@@ -396,6 +407,7 @@ var wasm = new Uint8Array([
 var stdin = '';
 process.stdin.on('data', function(chunk) { stdin += chunk; });
 process.stdin.on('end', function() { env.main(); });
+var heap;
 var i = 0;
 var lib = {
   read: function() { return stdin.charCodeAt(i++); },
@@ -404,11 +416,12 @@ var lib = {
 var env;
 if (process.argv.indexOf('--wasm') < 0) {
   env = js({lib: lib});
+  heap = function() { return env.u8; };
 } else {
   WebAssembly.instantiate(wasm, {lib: lib}).then(
     function(value) {
       env = Object.create(value.instance.exports);
-      env.u8 = new Uint8Array(env.memory.buffer);
+      heap = function() { return new Uint8Array(env.memory.buffer); };
     },
     function(error) {
       console.error(error.message.trim());
@@ -417,9 +430,10 @@ if (process.argv.indexOf('--wasm') < 0) {
   );
 }
 function pointerToString(address) {
+  var u8 = heap();
   var i = address;
-  while (env.u8[i]) i++;
-  return new Buffer(env.u8.subarray(address, i)).toString();
+  while (u8[i]) i++;
+  return new Buffer(u8.subarray(address, i)).toString();
 }`;
     console.log(code);
   });

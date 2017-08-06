@@ -12,33 +12,55 @@ function joinVariables(prefix: string, count: number, offset: number): string {
 }
 
 export function compile(module: Module): Uint8Array {
-  const {data, imports, functions} = module;
+  const {readOnly, readWrite, imports, functions} = module;
   const mapping = validate(module);
   let indent = '    ';
   let text = '';
+  let limit = 8;
+
+  if (readOnly !== null) {
+    limit = Math.max(limit, readOnly.offset + readOnly.data.length + 7 & ~7);
+  }
+
+  if (readWrite !== null) {
+    limit = Math.max(limit, readWrite.offset + readWrite.data.length + 7 & ~7);
+  }
 
   text += '(function(imports) {\n';
-  text += `  var buffer = new ArrayBuffer(${data.length});\n`;
-  text += '  var s1 = new Int8Array(buffer);\n';
-  text += '  var u1 = new Uint8Array(buffer);\n';
-  text += '  var s2 = new Int16Array(buffer);\n';
-  text += '  var u2 = new Uint16Array(buffer);\n';
-  text += '  var s4 = new Int32Array(buffer);\n';
-  text += '  var exports = {u8: u1};\n';
+  text += `  var limit = ${limit};\n`;
+  text += '  var next = limit;\n';
+  text += `  var buffer = new ArrayBuffer(limit);\n`;
+  text += '  var i8 = new Int8Array(buffer);\n';
+  text += '  var u8 = new Uint8Array(buffer);\n';
+  text += '  var i16 = new Int16Array(buffer);\n';
+  text += '  var u16 = new Uint16Array(buffer);\n';
+  text += '  var i32 = new Int32Array(buffer);\n';
+  text += '  var exports = {u8: u8};\n';
+  text += '  function alloc(size) {\n';
+  text += '    if (next + size > limit) {\n';
+  text += '      if (next + size > 0x7FFFF000) throw new Error("Out of memory");\n';
+  text += '      limit = Math.min((next + size) * 2, 0x7FFFF000);\n';
+  text += '      var old = u8;\n';
+  text += '      buffer = new ArrayBuffer(limit);\n';
+  text += '      i8 = new Int8Array(buffer);\n';
+  text += '      u8 = new Uint8Array(buffer);\n';
+  text += '      i16 = new Int16Array(buffer);\n';
+  text += '      u16 = new Uint16Array(buffer);\n';
+  text += '      i32 = new Int32Array(buffer);\n';
+  text += '      exports.u8 = u8;\n';
+  text += '      u8.set(old);\n';
+  text += '    }\n';
+  text += '    var ptr = next;\n';
+  text += '    next += size;\n';
+  text += '    return ptr;\n';
+  text += '  }\n';
 
-  let dataStart = 0;
-  let dataEnd = data.length;
+  if (readOnly !== null) {
+    text += `  u8.set([${Array.prototype.slice.call(readOnly.data).join(', ')}], ${readOnly.offset});\n`;
+  }
 
-  while (dataStart < dataEnd && !data[dataStart]) dataStart++;
-  while (dataStart < dataEnd && !data[dataEnd - 1]) dataEnd--;
-
-  if (dataStart < dataEnd) {
-    text += '  u1.set([';
-    for (let j = dataStart; j < dataEnd; j++) {
-      if (j > dataStart) text += ', ';
-      text += data[j];
-    }
-    text += `], ${dataStart});\n`;
+  if (readWrite !== null) {
+    text += `  u8.set([${Array.prototype.slice.call(readWrite.data).join(', ')}], ${readWrite.offset});\n`;
   }
 
   function mangle(name: string): string {
@@ -106,7 +128,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Load: {
-        text += 's4[';
+        text += 'i32[';
         emit(children[0]);
         emitOffset(value);
         text += ' >> 2]';
@@ -114,7 +136,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Load8S: {
-        text += 's1[';
+        text += 'i8[';
         emit(children[0]);
         emitOffset(value);
         text += ']';
@@ -122,7 +144,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Load8U: {
-        text += 'u1[';
+        text += 'u8[';
         emit(children[0]);
         emitOffset(value);
         text += ']';
@@ -130,7 +152,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Load16S: {
-        text += 's2[';
+        text += 'i16[';
         emit(children[0]);
         emitOffset(value);
         text += ' >> 1]';
@@ -138,7 +160,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Load16U: {
-        text += 'u2[';
+        text += 'u16[';
         emit(children[0]);
         emitOffset(value);
         text += ' >> 1]';
@@ -151,7 +173,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Store: {
-        text += `${indent}s4[`;
+        text += `${indent}i32[`;
         emit(children[0]);
         emitOffset(value);
         text += ' >> 2] = ';
@@ -161,7 +183,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Store8: {
-        text += `${indent}s1[`;
+        text += `${indent}i8[`;
         emit(children[0]);
         emitOffset(value);
         text += '] = ';
@@ -171,7 +193,7 @@ export function compile(module: Module): Uint8Array {
       }
 
       case Kind.I32_Store16: {
-        text += `${indent}s2[`;
+        text += `${indent}i16[`;
         emit(children[0]);
         emitOffset(value);
         text += ' >> 1] = ';
@@ -228,7 +250,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' === ';
         emit(children[1]);
-        text += ')';
+        text += ' | 0)';
         break;
       }
 
@@ -237,7 +259,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >= ';
         emit(children[1]);
-        text += ')';
+        text += ' | 0)';
         break;
       }
 
@@ -246,7 +268,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >>> 0) >= (';
         emit(children[1]);
-        text += ' >>> 0))';
+        text += ' >>> 0) | 0)';
         break;
       }
 
@@ -255,7 +277,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' > ';
         emit(children[1]);
-        text += ')';
+        text += ' | 0)';
         break;
       }
 
@@ -264,7 +286,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >>> 0) > (';
         emit(children[1]);
-        text += ' >>> 0))';
+        text += ' >>> 0) | 0)';
         break;
       }
 
@@ -273,7 +295,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >>> 0) <= (';
         emit(children[1]);
-        text += ' >>> 0))';
+        text += ' >>> 0) | 0)';
         break;
       }
 
@@ -282,7 +304,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >>> 0) <= (';
         emit(children[1]);
-        text += ' >>> 0))';
+        text += ' >>> 0) | 0)';
         break;
       }
 
@@ -291,7 +313,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' < ';
         emit(children[1]);
-        text += ')';
+        text += ' | 0)';
         break;
       }
 
@@ -300,7 +322,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' >>> 0) < (';
         emit(children[1]);
-        text += ' >>> 0))';
+        text += ' >>> 0) | 0)';
         break;
       }
 
@@ -318,7 +340,7 @@ export function compile(module: Module): Uint8Array {
         emit(children[0]);
         text += ' !== ';
         emit(children[1]);
-        text += ')';
+        text += ' | 0)';
         break;
       }
 
@@ -471,6 +493,13 @@ export function compile(module: Module): Uint8Array {
         emitStatement(children[1]);
         indent = oldIndent;
         text += `${indent}}\n`;
+        break;
+      }
+
+      case Kind.Mem_Alloc: {
+        text += 'alloc(';
+        emit(children[0]);
+        text += ' >>> 0)';
         break;
       }
     }

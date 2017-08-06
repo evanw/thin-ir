@@ -1,13 +1,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 // "Heap"
 
-_heap = 1024 // Skip over global variables
-
 def malloc(size) {
-  size = (size + 3) & (0 - 4) // Round up to a multiple of 4
-  ptr = _heap
-  _heap = _heap + size
-  return ptr
+  size = (size + 3) & (0 - 4) // Round up to a multiple of 4 to stay aligned
+  return new(size)
 }
 
 def memcpy(to, from, size) {
@@ -94,7 +90,64 @@ def list_append(list, value) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// String
+
+def string_from_int(n) {
+  // Handle the special case of INT_MIN
+  if (n == 2147483648) {
+    return "-2147483648"
+  }
+
+  length = 0
+  neg = 0
+
+  // Handle the minus sign
+  if (n < 0) {
+    length = 1
+    neg = 1
+    n = 0 - n
+  }
+
+  // Count the characters
+  temp = n
+  loop = 1
+  while (loop) {
+    temp = temp / 10
+    length = length + 1
+    if (temp == 0) loop = 0
+  }
+
+  // Allocate the string
+  text = malloc(length + 1)
+  text[length] = 0
+  i = length - 1
+
+  // Handle the minus sign
+  if (neg) {
+    text[0] = '-'
+  }
+
+  // Write to the string in reverse
+  temp = n
+  loop = 1
+  while (loop) {
+    text[i] = temp % 10 + '0'
+    temp = temp / 10
+    i = i - 1
+    if (temp == 0) loop = 0
+  }
+
+  return text
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Entry point
+
+def write_line(text) {
+  write(text)
+  write("
+")
+}
 
 def main() {
   list = list_new()
@@ -102,20 +155,44 @@ def main() {
 
   while (loop) {
     ch = read()
-    list_append(list, ch)
     if (ch == 0) loop = 0
+    else list_append(list, ch)
   }
 
   array = array_new(1)
   link = list._list_first
 
+  count = 0
+
   while (link != 0) {
-    array_append(array, link._link_value)
+    ch = link._link_value
+
+    // Escape newline
+    if (ch == 10) {
+      array_append(array, 92)
+      array_append(array, 'n')
+    }
+
+    // Escape double quote
+    else if (ch == '"') {
+      array_append(array, 92)
+      array_append(array, '"')
+    }
+
+    // Normal character
+    else {
+      array_append(array, ch)
+    }
+
     link = link._link_next
+    count = count + 1
   }
 
-  text = array._array_data
-  write("stdin: ")
-  write(text)
+  write("stdin.length = ")
+  write_line(string_from_int(count))
+
+  write("stdin.data = \"")
+  write(array._array_data)
+  write_line("\"")
   return 0
 }
