@@ -417,9 +417,9 @@ if (process.argv.indexOf('--wasm') < 0) {
   );
 }
 function pointerToString(address) {
-  var stdin = '';
-  while (env.u8[address]) stdin += String.fromCharCode(env.u8[address++]);
-  return stdin;
+  var i = address;
+  while (env.u8[i]) i++;
+  return new Buffer(env.u8.subarray(address, i)).toString();
 }`;
     console.log(code);
   });
